@@ -36,7 +36,7 @@ class Iff(BinaryOp):
     def __init__(self, i, d): super().__init__(i, d, "↔")
 
 
-# 2. PARSER DE LENGUAJE NATURAL
+# -------2. PARSER DE LENGUAJE NATURAL---------
 
 LETRAS = ['p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
 
@@ -77,9 +77,8 @@ class ParserNL:
             return Not(self._obtener_atomo(t[3:].strip()))
         return self._obtener_atomo(t)
 
-# ==============================================================================
-# 3. REGLAS DE EXPANSIÓN Y MOTOR TABLEAU
-# ==============================================================================
+
+# --------3. REGLAS DE EXPANSIÓN Y MOTOR TABLEAU----------
 
 def es_literal(f):
     return isinstance(f, Atom) or (isinstance(f, Not) and isinstance(f.sub, Atom))
@@ -140,9 +139,7 @@ class NodoTableau:
                 self.hijos.append(hijo)
                 hijo.expandir()
 
-# ==============================================================================
-# 4. VISUALIZACIÓN EN CONSOLA Y EJECUCIÓN
-# ==============================================================================
+# ---------4. VISUALIZACIÓN EN CONSOLA Y EJECUCIÓN--------
 
 def imprimir_arbol(nodo, prefijo="", es_ultimo=True):
     conector = "└── " if es_ultimo else "├── "
