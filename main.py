@@ -59,6 +59,9 @@ class ParserNL:
         t = re.sub(r'[.,;!¡?¿]', '', texto.lower().strip())
         t = re.sub(r'\s+', ' ', t)
 
+        if t.startswith('si ') and ' entonces ' not in t:
+            raise ValueError(f"Falta 'entonces' en la regla: «{texto.strip()}»")
+
         if t.startswith('no es cierto que '):
             return Not(self.parsear(t[17:]))
         if ' si y solo si ' in t:
@@ -139,90 +142,168 @@ class NodoTableau:
                 self.hijos.append(hijo)
                 hijo.expandir()
 
-# ---------4. VISUALIZACIÓN EN CONSOLA Y EJECUCIÓN--------
 
-def imprimir_arbol(nodo, prefijo="", es_ultimo=True):
+# ---------4. PERSONAJES Y ESCENARIOS--------
+# Un solo personaje: Mayor Monogram y Carl.
+
+PERSONAJE = {
+    "nombre": "Mayor Monogram y Carl",
+    "expande": "Carl descompone",
+    "cerrada": "¡TRAMPA FALLIDA!",
+    "abierta": "RUTA LIBRE",
+    "escenario": "Episodio",
+    "saludo": [
+        ("Mayor Monogram", "Buenos días, Agente P. Hemos interceptado unas reglas sospechosas. ¡Carl, el expediente!"),
+        ("Carl", "Aquí está, señor. Esto fue lo que logramos descifrar:"),
+    ],
+    "ok": [
+        ("Mayor Monogram", "¡Excelente trabajo, Agente P! Las reglas son CONSISTENTES: no hay contradicción alguna."),
+    ],
+    "fin_ok": [
+        ("Carl", "Señor, ¿y Perry el ornitorrinco? ...¿Dónde está Perry?"),
+        ("Mayor Monogram", "Seguro que está ocupado, Carl. Caso cerrado... ¡por ahora!"),
+    ],
+    "mal": [
+        ("Mayor Monogram", "¡Es una trampa! Las reglas son INCONSISTENTES: todas las ramas terminan en contradicción."),
+        ("Carl", "¡Se contradicen a sí mismas, señor! Ni el Dr. Doofenshmirtz haría un plan así... bueno, quizá sí."),
+        ("Mayor Monogram", "Buen trabajo, Agente P. Puede retirarse."),
+    ],
+}
+
+CASOS = {
+    '1': ("Consistente", [
+        "Si es de día, entonces voy a trabajar",
+        "Si llueve, entonces no voy a trabajar",
+        "Es de día",
+    ]),
+    '2': ("Inconsistente", [
+        "Si es de día, entonces voy a trabajar",
+        "Si llueve, entonces no voy a trabajar",
+        "Es de día",
+        "Llueve",
+    ]),
+}
+
+NOMBRES = ["Phineas", "Ferb", "Perry", "Candace", "Doofenshmirtz", "Isabella",
+           "Buford", "Baljeet", "Danville", "Vanessa"]
+
+def con_mayusculas(t):
+    # El parser pasa todo a minúsculas; aquí devolvemos las mayúsculas a los nombres
+    for n in NOMBRES:
+        t = re.sub(rf'\b{n.lower()}\b', n, t)
+    return t
+
+def decir(lineas):
+    for quien, msg in lineas:
+        print(f"\n  {quien}: {msg}")
+
+
+# ---------5. IMPRESIÓN DEL ÁRBOL Y EJECUCIÓN--------
+
+def imprimir_arbol(nodo, p, prefijo="", es_ultimo=True):
     conector = "└── " if es_ultimo else "├── "
     f_str = ", ".join(str(f) for f in nodo.formulas)
-    
+
     if nodo.cerrado:
-        estado = f"✕ (CERRADA por {nodo.motivo_cierre[0]} y {nodo.motivo_cierre[1]})"
+        estado = f"✕ ({p['cerrada']} {nodo.motivo_cierre[0]} y {nodo.motivo_cierre[1]} chocan)"
     elif not nodo.hijos:
-        estado = "✓ (ABIERTA)"
+        estado = f"✓ ({p['abierta']})"
     else:
-        estado = f" [al expandir: {nodo.formula_expandida}]"
+        estado = f"[{p['expande']}: {nodo.formula_expandida}]"
 
     print(f"{prefijo}{conector}{f_str} {estado}")
 
-    nuevo_prefijo = prefijo + ("    " if es_ultimo else "│   ")
+    nuevo = prefijo + ("    " if es_ultimo else "│   ")
     for i, hijo in enumerate(nodo.hijos):
-        imprimir_arbol(hijo, nuevo_prefijo, i == len(nodo.hijos) - 1)
+        imprimir_arbol(hijo, p, nuevo, i == len(nodo.hijos) - 1)
 
 def obtener_hojas(nodo):
     if not nodo.hijos: return [nodo]
     return [h for hijo in nodo.hijos for h in obtener_hojas(hijo)]
 
-def resolver_base_conocimiento(reglas_texto):
+def resolver(reglas_texto, p):
     parser = ParserNL()
-    formulas = [parser.parsear(r) for r in reglas_texto if r.strip()]
+    try:
+        formulas = [parser.parsear(r) for r in reglas_texto if r.strip()]
+    except ValueError as e:
+        print("\n" + "="*60)
+        print(f"\n  Carl: Señor, hay un problema con el expediente. {e}")
+        print("  Mayor Monogram: Corrígela con el formato «Si ..., entonces ...» e inténtalo de nuevo, Agente P.")
+        return
 
-    print("\n" + "="*55)
-    print(" 1. TABLA DE ÁTOMOS Y FÓRMULAS GENERADAS")
-    print("="*55)
+    # 1. Saludo, átomos y reglas
+    print("\n" + "="*60)
+    decir(p["saludo"])
+    print("\n  Átomos:")
     for letra, texto in parser.atomo_a_texto.items():
-        print(f"  {letra} = {texto}")
-    print("\nFórmulas bien formadas:")
+        print(f"    {letra} = {con_mayusculas(texto)}")
+    print("\n  Reglas:")
     for i, f in enumerate(formulas, 1):
-        print(f"  R{i}: {f}")
+        print(f"    R{i}: {f}")
 
-    print("\n" + "="*55)
-    print(" 2. ÁRBOL SEMÁNTICO (TABLEAU)")
-    print("="*55 + "\n")
+    # 2. Árbol (tableau)
+    print("\n" + "-"*60)
     raiz = NodoTableau(formulas)
     raiz.expandir()
-    imprimir_arbol(raiz)
+    imprimir_arbol(raiz, p)
 
+    # 3. Veredicto
     hojas = obtener_hojas(raiz)
-    cerradas = sum(1 for h in hojas if h.cerrado)
-    abiertas = sum(1 for h in hojas if not h.cerrado)
+    abiertas = [h for h in hojas if not h.cerrado]
+    print("\n" + "-"*60)
+    print(f"  Ramas: {len(hojas)} → {len(hojas) - len(abiertas)} cerradas (✕) y {len(abiertas)} abiertas (✓)")
 
-    print("\n" + "="*55)
-    print(" 3. VEREDICTO DE CONSISTENCIA")
-    print("="*55)
-    print(f"Ramas totales: {len(hojas)} → {cerradas} cerradas (✕) y {abiertas} abiertas (✓)\n")
-
-    if abiertas > 0:
-        print("[RESULTADO]: LA BASE DE CONOCIMIENTO ES CONSISTENTE (SATISFACIBLE)")
-        print("Modelos (asignaciones) que satisfacen las reglas:")
-        for idx, h in enumerate([h for h in hojas if not h.cerrado], 1):
-            literales = [f for f in h.formulas_rama if es_literal(f)]
+    if abiertas:
+        decir(p["ok"])
+        for idx, h in enumerate(abiertas, 1):
             modelo = {}
-            for lit in literales:
+            for lit in [f for f in h.formulas_rama if es_literal(f)]:
                 if isinstance(lit, Atom): modelo[lit.nombre] = "V"
                 else: modelo[lit.sub.nombre] = "F"
             asig = ", ".join(f"{k} = {v}" for k, v in sorted(modelo.items()))
-            print(f"  Modelo {idx}: ({asig})")
+            print(f"\n    ▶ {p['escenario']} {idx}: ({asig})")
+            for k, v in sorted(modelo.items()):
+                print(f"       · {'Ocurre' if v == 'V' else 'NO ocurre'}: {con_mayusculas(parser.atomo_a_texto[k])}")
+        decir(p["fin_ok"])
     else:
-        print("[RESULTADO]: LA BASE DE CONOCIMIENTO ES INCONSISTENTE")
+        decir(p["mal"])
+
+
+def pedir_reglas_manual():
+    print("Escribe una regla por línea (línea vacía para terminar):")
+    reglas = []
+    while True:
+        linea = input("> ").strip()
+        if not linea: break
+        reglas.append(linea)
+    return reglas
+
 
 if __name__ == "__main__":
     print("=== MOTOR DE INFERENCIA POR ÁRBOLES SEMÁNTICOS ===")
-    print("1. Ejecutar Caso de Prueba Mínimo")
-    print("2. Ingresar reglas manualmente")
-    
-    opc = input("\nOpción (1-2): ").strip()
-    if opc == '2':
-        print("\nIngrese las reglas (una por línea). Presione ENTER en una línea vacía para procesar:")
-        reglas = []
-        while True:
-            l = input("> ").strip()
-            if not l: break
-            reglas.append(l)
-    else:
-        reglas = [
-            "Si es de día, entonces voy a trabajar",
-            "Si llueve, entonces no voy a trabajar",
-            "Es de día"
-        ]
-    
-    resolver_base_conocimiento(reglas)
+
+    while True:
+        print(f"\nEscenarios de {PERSONAJE['nombre']}:")
+        for k, (titulo, _) in CASOS.items():
+            print(f"  {k}. {titulo}")
+        print("  3. Escribir mis propias reglas")
+        print("  0. Salir")
+
+        opc = input("\nOpción: ").strip()
+
+        if opc == '0':
+            print("\n  Mayor Monogram: ¡Hasta la próxima, Agente P!")
+            break
+        elif opc == '3':
+            reglas = pedir_reglas_manual()
+            if not reglas:
+                print("No escribiste ninguna regla.")
+                continue
+        elif opc in CASOS:
+            reglas = CASOS[opc][1]
+        else:
+            print("Opción no válida, intenta de nuevo.")
+            continue
+
+        resolver(reglas, PERSONAJE)
+        input("\nPresiona Enter para volver al menú...")
