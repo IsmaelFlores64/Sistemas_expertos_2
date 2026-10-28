@@ -5,7 +5,7 @@ import threading
 
 try:
     import tkinter as tk
-    from tkinter import ttk, font as tkfont
+    from tkinter import ttk, font as tkfont, filedialog, messagebox
     from tkinter.scrolledtext import ScrolledText
     HAY_TK = True
 except ImportError:
@@ -69,6 +69,11 @@ class ParserNL:
     def parsear(self, texto):
         t = re.sub(r'[.,;!¡?¿]', '', texto.lower().strip())
         t = re.sub(r'\s+', ' ', t)
+
+        # Acepta variantes con acento de los conectores: "sí y sólo sí", "ó", "Sí ..."
+        t = re.sub(r'\bs[ií] y s[oó]lo s[ií]\b', 'si y solo si', t)
+        t = re.sub(r'\bó\b', 'o', t)
+        t = re.sub(r'^sí\b', 'si', t)
 
         if t.startswith('si ') and ' entonces ' not in t:
             raise ValueError(f"Falta 'entonces' en la regla: «{texto.strip()}»")
@@ -170,7 +175,7 @@ PERSONAJE = {
         ("Mayor Monogram", "¡Excelente trabajo, Agente P! Las reglas son CONSISTENTES: no hay contradicción alguna."),
     ],
     "fin_ok": [
-        ("Carl", "Señor, ¿y Perry el ornitorrinco? ...¿Dónde está Perry?"),
+        ("Carl", "Señor, ¿y Perry?"),
         ("Mayor Monogram", "Seguro que está ocupado, Carl. Caso cerrado... ¡por ahora!"),
     ],
     "mal": [
@@ -394,9 +399,6 @@ def construir_reporte(parser, formulas, raiz):
             out.append(f"{quien}: {msg}\n")
 
     dec(p["saludo"])
-    out.append("\nÁtomos:\n")
-    for letra, texto in parser.atomo_a_texto.items():
-        out.append(f"  {letra} = {con_mayusculas(texto)}\n")
     out.append("\nReglas:\n")
     for i, f in enumerate(formulas, 1):
         out.append(f"  R{i}: {f}\n")
@@ -455,9 +457,17 @@ class App:
         self.txt_reglas.pack(fill="x", pady=(0, 6))
 
         botones = ttk.Frame(izq)
-        botones.pack(fill="x", pady=(0, 6))
+        botones.pack(fill="x", pady=(0, 4))
         ttk.Button(botones, text="Resolver y graficar", command=self.resolver).pack(side="left")
         ttk.Button(botones, text="Limpiar", command=self.limpiar).pack(side="left", padx=6)
+
+        botones2 = ttk.Frame(izq)
+        botones2.pack(fill="x", pady=(0, 4))
+        ttk.Button(botones2, text="Guardar reglas", command=self.guardar_reglas).pack(side="left")
+        ttk.Button(botones2, text="Cargar reglas", command=self.cargar_reglas).pack(side="left", padx=6)
+
+        self.lbl_estado = ttk.Label(izq, text="", foreground="#2e8b57")
+        self.lbl_estado.pack(anchor="w", pady=(0, 4))
 
         ttk.Label(izq, text="Expediente:").pack(anchor="w")
         self.reporte = ScrolledText(izq, wrap="word", font=self.fuente, state="disabled")
@@ -466,6 +476,21 @@ class App:
         # ----- Derecha: canvas con scroll -----
         der = ttk.Frame(panel)
         panel.add(der, weight=4)
+
+        # Tabla de átomos (se empaqueta primero para quedar hasta abajo)
+        marco_atomos = ttk.LabelFrame(der, text="Átomos", padding=4)
+        marco_atomos.pack(side="bottom", fill="x")
+        self.tabla_atomos = ttk.Treeview(
+            marco_atomos, columns=("letra", "significado"), show="headings", height=5
+        )
+        self.tabla_atomos.heading("letra", text="Átomo")
+        self.tabla_atomos.heading("significado", text="Significado")
+        self.tabla_atomos.column("letra", width=80, anchor="center", stretch=False)
+        self.tabla_atomos.column("significado", width=700, anchor="w")
+        sb_atomos = ttk.Scrollbar(marco_atomos, orient="vertical", command=self.tabla_atomos.yview)
+        self.tabla_atomos.configure(yscrollcommand=sb_atomos.set)
+        sb_atomos.pack(side="right", fill="y")
+        self.tabla_atomos.pack(side="left", fill="x", expand=True)
 
         self.canvas = tk.Canvas(der, bg="white", highlightthickness=0)
         sb_y = ttk.Scrollbar(der, orient="vertical", command=self.canvas.yview)
@@ -512,10 +537,63 @@ class App:
         if idx < len(claves):
             self.txt_reglas.insert("1.0", "\n".join(CASOS[claves[idx]][1]))
 
+    def mostrar_atomos(self, parser=None):
+        self.tabla_atomos.delete(*self.tabla_atomos.get_children())
+        if parser is None:
+            return
+        for letra, texto in parser.atomo_a_texto.items():
+            self.tabla_atomos.insert("", "end", values=(letra, con_mayusculas(texto)))
+
     def limpiar(self):
         self.txt_reglas.delete("1.0", "end")
         self.canvas.delete("all")
+        self.mostrar_atomos()
         self.mostrar_reporte("")
+
+    def _reglas_del_cuadro(self):
+        return [l.strip() for l in self.txt_reglas.get("1.0", "end").splitlines() if l.strip()]
+
+    def guardar_reglas(self):
+        reglas = self._reglas_del_cuadro()
+        if not reglas:
+            messagebox.showwarning("Guardar reglas", "No hay reglas para guardar.")
+            return
+        ruta = filedialog.asksaveasfilename(
+            title="Guardar reglas",
+            defaultextension=".txt",
+            initialfile="mis_reglas.txt",
+            filetypes=[("Texto", "*.txt"), ("Todos los archivos", "*.*")],
+        )
+        if not ruta:
+            return
+        try:
+            with open(ruta, "w", encoding="utf-8") as f:
+                f.write("\n".join(reglas) + "\n")
+        except OSError as e:
+            messagebox.showerror("Guardar reglas", f"No se pudo guardar el archivo:\n{e}")
+            return
+        self.lbl_estado.configure(text=f"✓ {len(reglas)} regla(s) guardadas en {ruta}")
+
+    def cargar_reglas(self):
+        ruta = filedialog.askopenfilename(
+            title="Cargar reglas",
+            filetypes=[("Texto", "*.txt"), ("Todos los archivos", "*.*")],
+        )
+        if not ruta:
+            return
+        try:
+            with open(ruta, "r", encoding="utf-8-sig") as f:
+                reglas = [l.strip() for l in f.read().splitlines() if l.strip()]
+        except (OSError, UnicodeDecodeError) as e:
+            messagebox.showerror("Cargar reglas", f"No se pudo leer el archivo:\n{e}")
+            return
+        if not reglas:
+            messagebox.showwarning("Cargar reglas", "El archivo no tiene reglas.")
+            return
+        self.combo.current(len(self.combo["values"]) - 1)   # "Mis propias reglas"
+        self.txt_reglas.delete("1.0", "end")
+        self.txt_reglas.insert("1.0", "\n".join(reglas))
+        self.lbl_estado.configure(text=f"✓ {len(reglas)} regla(s) cargadas de {ruta}")
 
     def mostrar_reporte(self, texto):
         self.reporte.configure(state="normal")
@@ -528,6 +606,7 @@ class App:
         if not reglas:
             self.mostrar_reporte("Escribe al menos una regla.")
             self.canvas.delete("all")
+            self.mostrar_atomos()
             return
 
         parser = ParserNL()
@@ -535,6 +614,7 @@ class App:
             formulas = [parser.parsear(r) for r in reglas]
         except ValueError as e:
             self.canvas.delete("all")
+            self.mostrar_atomos()
             self.mostrar_reporte(
                 f"Carl: Señor, hay un problema con el expediente. {e}\n\n"
                 "Mayor Monogram: Corrígela con el formato «Si ..., entonces ...» "
@@ -544,6 +624,7 @@ class App:
 
         raiz = NodoTableau(formulas)
         raiz.expandir()
+        self.mostrar_atomos(parser)
         self.mostrar_reporte(construir_reporte(parser, formulas, raiz))
         self.dibujar(raiz)
 
@@ -612,13 +693,22 @@ if __name__ == "__main__":
         print("\nNo se encontró tkinter en este Python; usando solo la consola.")
         modo = '2'
 
-    if modo == '1':
-        abrir_gui().mainloop()
-    elif modo == '3':
-        cola = queue.Queue()
-        ventana = abrir_gui(cola)
+    cola = queue.Queue() if modo == '3' else None
+    ventana = None
+    if modo in ('1', '3'):
+        try:
+            ventana = abrir_gui(cola)
+        except tk.TclError:
+            print("\nNo se pudo abrir la ventana: este equipo no tiene pantalla "
+                  "(por ejemplo GitHub Codespaces o un servidor).")
+            print("Ejecuta el programa en tu computadora para usar la interfaz gráfica.")
+            print("Mientras tanto, se usará la consola.")
+
+    if ventana is None:
+        menu_consola()
+    elif modo == '1':
+        ventana.mainloop()
+    else:
         # La consola corre en otro hilo; la ventana debe quedarse en el hilo principal
         threading.Thread(target=menu_consola, args=(cola,), daemon=True).start()
         ventana.mainloop()
-    else:
-        menu_consola()
